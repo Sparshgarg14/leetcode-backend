@@ -1,6 +1,9 @@
 package com.example.leetcode.Controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -11,7 +14,7 @@ import java.util.Map;
 @RequestMapping("/api/leetcode")
 public class LeetcodeEntryController {
 
-    private final String BASE_API_URL = "https://leetcode-stats-api.herokuapp.com/";
+    private final String GRAPHQL_API_URL = "https://leetcode.com/graphql";
 
     @Autowired
     private RestTemplate restTemplate;
@@ -19,23 +22,56 @@ public class LeetcodeEntryController {
     // Endpoint to fetch user's solved questions and ranking
     @GetMapping("/user/{username}/stats")
     public ResponseEntity<?> getUserStats(@PathVariable String username) {
-        String url = BASE_API_URL + username;
+        String query = "query getUserProfile($username: String!) {\n" +
+                "  matchedUser(username: $username) {\n" +
+                "    profile {\n" +
+                "      ranking\n" +
+                "    }\n" +
+                "    submitStats {\n" +
+                "      acSubmissionNum {\n" +
+                "        difficulty\n" +
+                "        count\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
+
+        Map<String, Object> requestPayload = Map.of(
+                "query", query,
+                "variables", Map.of("username", username)
+        );
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestPayload, headers);
+
         try {
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    GRAPHQL_API_URL,
+                    requestEntity,
+                    Map.class
+            );
+
             Map<String, Object> responseBody = response.getBody();
+            if (responseBody != null && responseBody.containsKey("data")) {
+                Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
+                Map<String, Object> matchedUser = (Map<String, Object>) data.get("matchedUser");
 
-            if (responseBody != null) {
-                Object totalSolved = responseBody.get("totalSolved");
-                Object ranking = responseBody.get("ranking");
+                if (matchedUser != null) {
+                    Map<String, Object> profile = (Map<String, Object>) matchedUser.get("profile");
+                    Map<String, Object> submitStats = (Map<String, Object>) matchedUser.get("submitStats");
 
-                if (totalSolved != null && ranking != null) {
-                    return ResponseEntity.ok(Map.of(
-                            "totalSolved", totalSolved,
-                            "ranking", ranking
-                    ));
-                } else {
-                    return ResponseEntity.badRequest().body("Invalid username or incomplete data.");
+                    if (profile != null && submitStats != null) {
+                        Object ranking = profile.get("ranking");
+                        Object acSubmissionNum = submitStats.get("acSubmissionNum");
+
+                        return ResponseEntity.ok(Map.of(
+                                "totalSolved", acSubmissionNum,
+                                "ranking", ranking
+                        ));
+                    }
                 }
+                return ResponseEntity.badRequest().body("Invalid username or incomplete data.");
             } else {
                 return ResponseEntity.badRequest().body("No data found for the username.");
             }
